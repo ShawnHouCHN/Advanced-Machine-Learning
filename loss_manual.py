@@ -28,12 +28,16 @@ for i in range(0,m-1):
     closest = distance_matrix[i,same_class].argsort()[1:k+1] # excluding self obviously
     eta[i,closest] = 1
 
+# more efficient way?
+
 # find all DIFFERENT class points
 # non-zero elements in each row correspond to different class points
 diff_class = np.zeros([m,m])
 for i in range(0,m-1):
     different_class = y != y[i]
     diff_class[i,different_class] = 1
+
+# more efficient way?
 
 # LMNN loss function
 omega_1 = 0.5
@@ -43,64 +47,27 @@ pull_sum = omega_1 * np.sum(np.multiply(eta,distance_matrix))
 
 # PUSH - step
 diff_class_dist = np.multiply(diff_class,distance_matrix)
-same_class_dist = np.multiply(eta,distance_matrix)
-same_class_dist[same_class_dist != 0] += 1# arbitrary + 1 value
+# select k distances to closest same class neighbours
+same_class_dist = np.sort(np.multiply(eta,distance_matrix))[:,-k:]
+# arbitrary + 1 increase
+same_class_dist += 1
+
 push_sum = 0
-
+# loop for k of each neighbours
 for i in range(k):
+    # loop for each sample
+    for j in range(m):
+        # pick 1 distance - k-th closest element to m-th observation
+        reference_value = same_class_dist[j,i]
+        # find which different class distances are maller than picked up above
+        relevant_diff_class_dist = diff_class_dist[j,(diff_class_dist < reference_value)[0,:]]
+        # throw out all 0-s
+        relevant_diff_class_dist = relevant_diff_class_dist[relevant_diff_class_dist != 0]
+        # add the difference to total push-sum
+        push_sum += np.sum(reference_value - relevant_diff_class_dist)
+push_sum = (1 - omega_1) * push_sum
 
+# total loss value here
+total_loss = pull_sum + push_sum
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# assign gian values to diagonal so same element will not be closest to itself
-test_dist[range(test_dist.shape[0]),range(test_dist.shape[0])] = np.matrix.max(test_dist)*2
-
-# find k nearest SAME CLASS points for each element
-
-
-# find all DIFFERENT class points
-diff_class = np.zeros([m,m])
-for i in range(0,m-1):
-    different_class = y != y[i]
-    diff_class[i,different_class] = 1
-
-# compute loss function in 2 parts
-omega = 0.5
-
-# split computations into 2 parts
-# part 1
-loss_part1 = 0
-for i in range(0,m-1):
-    for j in range(0,m-1):
-        if eta[i,j] != 0:
-            # distance between each points with respect to L is already calculated
-            loss_part1 += omega * test_dist[i,j]
-
-# part 2
-loss_part2 = 0
-for i in range(0,m-1):
-    for j in range(0,m-1):
-        for l in range(0,m-1):
-            if eta[i,j] != 0:
-                if diff_class[i,l] != 0:
-                    # again distances already calculated above
-                    loss_part2 += (1-omega) * max(0,
-                                                  1 + test_dist[i,j] - test_dist[i,l])
-
-# total loss
-Loss = loss_part1 + loss_part2
-
-# next - derivative for d^2 elements of matrix L, just code what I did by hand
+# gradient with respect to each elements 
