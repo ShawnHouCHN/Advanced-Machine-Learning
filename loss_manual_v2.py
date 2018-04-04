@@ -43,6 +43,7 @@ for i in range(m):
     eta_index[i,] = point_distances.argsort()[1:k + 1]
 eta = csr_matrix((np.repeat(1,m*k), (eta_row, eta_col)), shape=(m, m))
 
+# NOW NOT NEEDED FUNCTION:
 def impostors_distances(neighbour_k,distance_matrix):
     # neighbour_k - m by 1, consists of distances for all m points to their k-s nearest same class neighbour
     # distance _matrix - m by m
@@ -87,16 +88,48 @@ def loss_simple(L_in):
     neighbour_distance_matrix = eta.multiply(distance_matrix)
     pull_sum = omega_1 * neighbour_distance_matrix.sum()
 
-    # Push step
-    # create m by k matrix, which will have distances to k closest neighbours for all m elements
-    reference_distances_array = neighbour_distance_matrix.toarray()
-    reference_distances_array.sort(axis=1)
-    reference_distances_array = reference_distances_array[:,range(m-k,m)]
+    # auxillary distances to DIFFERENT CLASS points
+    distance_matrix_aux = np.multiply(distance_matrix,dif_class_matrix)
+    distance_matrix_aux[distance_matrix_aux == 0] = 10 * np.amax(distance_matrix_aux)
+
+    impostor_num = 0
+    i_indexes = []
+    j_indexes = []
+    impostor_indexes = []
+    for i in range(m):
+        for j in eta_index[i,]:
+            reference_distance = distance_matrix[i,j] + 1 # distance_matrix[i,j] + 1
+            impostor_num += sum(distance_matrix_aux[i,] <= reference_distance)
+            impostors =  [j for j, x in enumerate(distance_matrix_aux[i,] <= reference_distance) if x]
+            i_indexes = np.append(i_indexes,np.repeat(i,np.size(impostors)))
+            j_indexes = np.append(j_indexes, np.repeat(j, np.size(impostors)))
+            impostor_indexes = np.append(impostor_indexes,impostors)
+
+    i_indexes = i_indexes.astype(int)
+    j_indexes = j_indexes.astype(int)
+    impostor_indexes = impostor_indexes.astype(int)
 
     push_sum = 0
-    # calculate push part in k steps
-    for i in range(k):
-        push_sum += impostors_distances(reference_distances_array[:,i],distance_matrix).sum()
+    for n in range(impostor_num):
+        i = i_indexes[n]
+        j = j_indexes[n]
+        l = impostor_indexes[n]
+        push_sum += (1 + distance_matrix[i,j] - distance_matrix[i,l])
+
+    # # Push step
+    # # create m by k matrix, which will have distances to k closest neighbours for all m elements
+    # reference_distances_array = neighbour_distance_matrix.toarray()
+    # reference_distances_array.sort(axis=1)
+    # reference_distances_array = reference_distances_array[:,range(m-k,m)]
+
+    # push_sum = 0
+    # # calculate push part in k steps
+    # act = 0
+    # for i in range(k):
+    #     p = impostors_distances(reference_distances_array[:,i],distance_matrix).sum()
+    #     if p > 0:
+    #         act += 1
+    #     push_sum += p
 
     push_sum = (1 - omega_1) * push_sum
 
@@ -134,18 +167,18 @@ def loss_simple_jac(L_in):
             # index of k-th nearest same class neighbour of i
             index_j = eta_index[i,j]
             # reference distance to deciding if there is a push-step derivative at all
-            reference_distance = distance_matrix[i,index_j]
+            reference_distance = distance_matrix[i,index_j] + 1
             # find possible impostors
             impostors = [z for z, x in enumerate(distance_matrix_aux[i,] < reference_distance) if x]
             # if there are impostors for given pair x_i and x_j
             if np.size(impostors) > 0:
                 for imp in impostors:
-                    p1 = np.dot((X_transformed[i,].T - X_transformed[index_j,].T),np.reshape((X[i,] - X[index_j,]),(1,d)))
-                    p2 = np.dot((X_transformed[i,].T - X_transformed[imp,].T),np.reshape((X[i,] - X[imp,]),(1,d)))
-                    jac += (1 - omega_1) * (p1 + p2)
+                    p1 = 2 * np.dot((X_transformed[i,].T - X_transformed[index_j,].T),np.reshape((X[i,] - X[index_j,]),(1,d)))
+                    p2 = 2 * np.dot((X_transformed[i,].T - X_transformed[imp,].T),np.reshape((X[i,] - X[imp,]),(1,d)))
+                    jac += (1 - omega_1) * (p1 - p2)
             # if there is NO impostors for given pair x_i and x_j
             else:
-                jac += omega_1  * np.dot((X_transformed[i,].T - X_transformed[index_j,].T),np.reshape((X[i,] - X[index_j,]),(1,d)))
+                jac += omega_1 * 2 * np.dot((X_transformed[i,].T - X_transformed[index_j,].T),np.reshape((X[i,] - X[index_j,]),(1,d)))
 
     jac = np.reshape(jac,(1,d**2))
     return jac
@@ -154,7 +187,7 @@ def loss_simple_jac(L_in):
 L_init = np.eye(d)
 L_init = np.reshape(L_init, (d**2,))
 
-res = minimize(loss_simple, L_init, method='L-BFGS-B',jac=loss_simple_jac,options={'xtol': 1e-8, 'disp': True})
+res = minimize(loss_simple, L_init, method='L-BFGS-B',jac=loss_simple_jac,options={'disp': True})
 L_optim = res.x.reshape((d,d))
 
 L_optim_flat = np.reshape(L_optim,(d**2,))
