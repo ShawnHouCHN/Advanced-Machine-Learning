@@ -3,6 +3,7 @@ from scipy.optimize import minimize
 from scipy.sparse import csr_matrix
 from sklearn.datasets import load_iris
 from sklearn.metrics.pairwise import euclidean_distances
+from sklearn.decomposition import PCA
 
 # k-value here
 k = 4
@@ -176,6 +177,7 @@ def loss_simple_jac(L_in):
                     p1 = 2 * np.dot((X_transformed[i,].T - X_transformed[index_j,].T),np.reshape((X[i,] - X[index_j,]),(1,d)))
                     p2 = 2 * np.dot((X_transformed[i,].T - X_transformed[imp,].T),np.reshape((X[i,] - X[imp,]),(1,d)))
                     jac += (1 - omega_1) * (p1 - p2)
+                jac += omega_1 * 2 * np.dot((X_transformed[i,].T - X_transformed[index_j,].T),np.reshape((X[i,] - X[index_j,]),(1,d)))
             # if there is NO impostors for given pair x_i and x_j
             else:
                 jac += omega_1 * 2 * np.dot((X_transformed[i,].T - X_transformed[index_j,].T),np.reshape((X[i,] - X[index_j,]),(1,d)))
@@ -187,9 +189,16 @@ def loss_simple_jac(L_in):
 L_init = np.eye(d)
 L_init = np.reshape(L_init, (d**2,))
 
-res = minimize(loss_simple, L_init, method='L-BFGS-B',jac=loss_simple_jac,options={'disp': True})
+# alternative PCA
+pca = PCA(n_components=d)
+a = pca.fit(X)
+L_init_alt = a.components_
+L_init_alt = np.reshape(L_init_alt, (d**2,))
+
+res = minimize(loss_simple, L_init_alt, method='L-BFGS-B',jac=loss_simple_jac,options={'disp': True})
 L_optim = res.x.reshape((d,d))
 
 L_optim_flat = np.reshape(L_optim,(d**2,))
 loss_simple(L_optim_flat)
 loss_simple_jac(L_optim_flat)
+
