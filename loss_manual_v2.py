@@ -190,15 +190,16 @@ L_init = np.eye(d)
 L_init = np.reshape(L_init, (d**2,))
 
 # alternative PCA
-pca = PCA(n_components=d)
-a = pca.fit(X)
-L_init_alt = a.components_
-L_init_alt = np.reshape(L_init_alt, (d**2,))
+#pca = PCA(n_components=d)
+#a = pca.fit(X)
+#L_init_alt = a.components_
+#L_init_alt = np.reshape(L_init_alt, (d**2,))
 
-res = minimize(loss_simple, L_init_alt, method='L-BFGS-B',jac=loss_simple_jac,options={'disp': True})
+res = minimize(loss_simple, L_init, method='L-BFGS-B',jac=loss_simple_jac,options={'disp': True})
 L_optim = res.x.reshape((d,d))
 
 L_optim_flat = np.reshape(L_optim,(d**2,))
 loss_simple(L_optim_flat)
 loss_simple_jac(L_optim_flat)
 
+print (loss_simple(L_optim_flat))
