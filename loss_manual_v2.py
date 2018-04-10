@@ -39,9 +39,10 @@ for i in range(m):
     point_distances = initial_distance[i,]
     # assign large values to different class points - so they will never be closest ones
     point_distances[dif_class] = max(point_distances) * 10
+    point_distances[i] = max(point_distances) * 10
     # remember indexes of k closest same class neighbours for point i
-    eta_col = np.append(eta_col,point_distances.argsort()[1:k + 1])
-    eta_index[i,] = point_distances.argsort()[1:k + 1]
+    eta_col = np.append(eta_col,point_distances.argsort()[0:k])
+    eta_index[i,] = point_distances.argsort()[0:k]
 eta = csr_matrix((np.repeat(1,m*k), (eta_row, eta_col)), shape=(m, m))
 
 # NOW NOT NEEDED FUNCTION:
