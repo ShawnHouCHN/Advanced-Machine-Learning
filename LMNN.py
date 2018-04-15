@@ -204,6 +204,9 @@ class LargeMarginNearestNeighbor(KNeighborsClassifier):
                 
                 if j < self.k: 
                     index_j = self.eta_index[i, j]
+                    reference_distance = distance_matrix[i,index_j] + 1
+                    # find possible impostors
+                    impostors, = np.where((distance_matrix_aux[i, ] - reference_distance)< 0 )
                     if np.size(impostors) > 0:
                         for imp in impostors:
                             p1 = 2 * np.dot((X_transformed[i, ].T - X_transformed[index_j, ].T), np.reshape((self.X[i, ] - self.X[index_j, ]), (1, self.d)))
@@ -229,7 +232,7 @@ class LargeMarginNearestNeighbor(KNeighborsClassifier):
         total_loss = push_sum + pull_sum   
         
         
-        return total_loss, jac.flatten()
+        return total_loss, L.dot(jac).flatten()
    ################################################################################################################################################
 
     def loss_simple(self, L_in):
