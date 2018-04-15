@@ -20,12 +20,22 @@ from sklearn.metrics.pairwise import euclidean_distances
 
 dataset = load_iris()
 X, labels = dataset.data, dataset.target
-m = X.shape[0]
+
+# subset into labeled and unlabeled parts
+X_labeled = np.delete(X,(range(40),range(50,90),range(100,140)),0)
+labels = np.delete(labels,(range(40),range(50,90),range(100,140)))
+X_unlabeled = np.delete(X,(range(40,50),range(90,100),range(140,150)),0)
+
+
+m = X_labeled.shape[0]
+m_ul = X_unlabeled.shape[0]
 d = X.shape[1]
 k = 4
 omega_1 = 0.5
+omega_2 = 0.5
+omega_3 = 0.5
 
-initial_distance = euclidean_distances(X, squared=True)
+initial_distance_l = euclidean_distances(X_labeled, squared=True)
 
 L_init = np.eye(d, d)
 
@@ -46,15 +56,33 @@ def compute_eta(distances):
     eta = csr_matrix((np.repeat(1,m*k), (eta_row, eta_col)), shape=(m, m))
     return eta
 
-eta = compute_eta(initial_distance).todense()
+eta = compute_eta(initial_distance_l).todense()
+
+def compute_eta_ul(initial_distance_ul):
+    # same procedure to find closest unlabeled points
+    eta_index_ul = np.empty(shape=(m, k), dtype=int)
+    eta_row_ul = np.repeat(range(m), k)
+    eta_col_ul = []
+    for i in range(m):
+        # take distances from point i to all other unlabeled points
+        point_distances = initial_distance_ul[i,]
+        # remember indexes of k closest unlabeled neighbours for point i
+        eta_col_ul = np.append(eta_col_ul, point_distances.argsort()[0:k])
+        eta_index_ul[i,] = point_distances.argsort()[0:k]
+    eta_ul = csr_matrix((np.repeat(1, m * k), (eta_row_ul, eta_col_ul)), shape=(m, m_ul))
+    return eta_ul
+
+initial_distance_ul = euclidean_distances(X_labeled, X_unlabeled, squared=True)
+
+eta_ul = compute_eta_ul(initial_distance_ul).todense()
 
 y = np.matrix([labels == labels[i] for i in range(m)], dtype="int")
 np.fill_diagonal(y, 0)
 
 #y = np.matrix([[0,1,0,0], [1,0,0,0], [0,0,0,1], [0,0,1,0]])
 
-def _compute_pull(omega_1, eta, X_tr):
-    m = X_tr.shape[0]
+def _compute_pull_lmnn(omega_1, eta, X_labeled_tr):
+
     sum = 0
     count = 0
     for i in range(m):
@@ -62,14 +90,14 @@ def _compute_pull(omega_1, eta, X_tr):
             if eta[i, j] == 0:
                 continue
             if j != i:
-                dist_ij = norm(X_tr[i] - X_tr[j])**2
+                dist_ij = norm(X_labeled_tr[i] - X_labeled_tr[j])**2
                 count += 1
                 sum += eta[i, j] * dist_ij
-    print("count pull loss: {}".format(count))
+    #print("count pull loss: {}".format(count))
     return omega_1 * sum
 
 
-def _compute_push(omega_1, eta, L, X_tr, y):
+def _compute_push_lmnn(omega_1, eta, L, X_labeled_tr, y):
     count = 0
     total = 0
     impostor_indices = []
@@ -83,8 +111,8 @@ def _compute_push(omega_1, eta, L, X_tr, y):
                     if eta[i,j] == 0 or (1 - y[i,l]) == 0:
                         continue
                     if l != i and l != j:
-                        dist_ij = norm(X_tr[i] - X_tr[j])**2
-                        dist_il = norm(X_tr[i] - X_tr[l])**2
+                        dist_ij = norm(X_labeled_tr[i] - X_labeled_tr[j])**2
+                        dist_il = norm(X_labeled_tr[i] - X_labeled_tr[l])**2
                         #dist_pos = max(0, 1 + dist_ij - dist_il)
                         #addend = eta[i, j] * (1 - y[i, l]) * dist_pos
 
@@ -95,42 +123,44 @@ def _compute_push(omega_1, eta, L, X_tr, y):
                             impostor_indices.append((i, j, l))
                             # print("Adding {} to sum in loss (i,j,l) = ({}, {}, {}) ".format(addend, i, j, l))
 
-    print("count loss : {}".format(count))
+    #print("count loss : {}".format(count))
     return (1 - omega_1) * total, impostor_indices
 
 # old args: w_1, eta, L, X, y
-def compute_loss(L, X_tr, eta):
-    pull = _compute_pull(omega_1, eta, X_tr)
-    push, impostor_indices = _compute_push(omega_1, eta, L, X_tr, y)
+def compute_loss_lmnn(L, X_labeled_tr, eta):
+    pull = _compute_pull_lmnn(omega_1, eta, X_labeled_tr)
+    push, impostor_indices = _compute_push_lmnn(omega_1, eta, L, X_labeled_tr, y)
 
-    print("push: {}, pull: {}".format(push, pull))
+    #print("loss pull L {}".format(pull))
+    #print("loss push L {}".format(push))
+
     #print("Loss: {}".format(pull + push))
     return pull + push, impostor_indices
 
-def norm_grad_g_ij(i, j, L, X, X_tr):
+def norm_grad_g_ij_lmnn(i, j, L, X_labeled, X_labeled_tr):
     g = np.empty([d, d])
     for n in range(d):
         for k in range(d):
 
-            grad_add = 2 * (X_tr[i,n] - X_tr[j,n]) * (X[i, k] - X[j, k])
+            grad_add = 2 * (X_labeled_tr[i,n] - X_labeled_tr[j,n]) * (X_labeled[i, k] - X_labeled[j, k])
             #print("Adding {} (n,k) = ({}, {})".format(grad_add, n, k))
 
             g[n,k] = grad_add
     return g
 
-def norm_grad_g_il(i, l, L, X, X_tr):
+def norm_grad_g_il_lmnn(i, l, L, X_labeled, X_labeled_tr):
     g = np.empty([d, d])
     for n in range(d):
         for k in range(d):
 
-            grad_add = 2 * (X_tr[i,n] - X_tr[l,n]) * (X[i, k] - X[l, k])
+            grad_add = 2 * (X_labeled_tr[i,n] - X_labeled_tr[l,n]) * (X_labeled[i, k] - X_labeled[l, k])
             #print("Adding {} (n,k) = ({}, {})".format(grad_add, n, k))
 
             g[n,k] = grad_add
     return g
 
 
-def _compute_gradient_pull(omega_1, eta, L, X, X_tr):
+def _compute_gradient_pull_lmnn(omega_1, eta, L, X_labeled, X_labeled_tr):
     total = np.zeros([d,d])
     count = 0
     for i in range(m):
@@ -139,12 +169,12 @@ def _compute_gradient_pull(omega_1, eta, L, X, X_tr):
                 continue
             if j != i:
                 count += 1
-                total += eta[i,j] * norm_grad_g_ij(i, j, L, X, X_tr)
+                total += eta[i,j] * norm_grad_g_ij_lmnn(i, j, L, X_labeled, X_labeled_tr)
 
-    print("count pull grad: {}".format(count))
+    #print("count pull grad: {}".format(count))
     return omega_1 * total
 
-def _compute_gradient_push(omega_1, eta, L, X, X_tr, y):
+def _compute_gradient_push_lmnn(omega_1, eta, L, X_labeled, X_labeled_tr, y):
     total = np.zeros([d, d])
 
     count = 0
@@ -155,13 +185,13 @@ def _compute_gradient_push(omega_1, eta, L, X, X_tr, y):
                     if eta[i,j] == 0 or (1 - y[i,l]) == 0:
                         continue
                     if l !=i and l != j:
-                        dist_ij = norm(X_tr[i] - X_tr[j])** 2
-                        dist_il = norm(X_tr[i] - X_tr[l])** 2
+                        dist_ij = norm(X_labeled_tr[i] - X_labeled_tr[j])** 2
+                        dist_il = norm(X_labeled_tr[i] - X_labeled_tr[l])** 2
 
                         if 1 + dist_ij - dist_il > 0:
 
-                            g_ij = norm_grad_g_ij(i, j, L, X, X_tr)
-                            g_il = norm_grad_g_il(i, l, L, X, X_tr)
+                            g_ij = norm_grad_g_ij_lmnn(i, j, L, X_labeled, X_labeled_tr)
+                            g_il = norm_grad_g_il_lmnn(i, l, L, X_labeled, X_labeled_tr)
                             g_sum = g_ij - g_il
                             addend = eta[i,j] * (1 - y[i,l]) * g_sum
 
@@ -170,106 +200,216 @@ def _compute_gradient_push(omega_1, eta, L, X, X_tr, y):
                             count += 1
                             total += addend
 
-    print("count gradient : {}".format(count))
+    #print("count gradient : {}".format(count))
 
     return (1 - omega_1) * total
 
 # for every point pair(pull) and triplet (push), there's a d^2-element gradient
 # old args: w_1, eta, L, X, y
-def compute_gradient(L, X_tr, eta):
+def compute_gradient_lmnn(L, X_labeled, X_labeled_tr, eta):
 
-    pull = _compute_gradient_pull(omega_1, eta, L, X, X_tr)
-    push = _compute_gradient_push(omega_1, eta, L, X, X_tr, y)
+    pull = _compute_gradient_pull_lmnn(omega_1, eta, L, X_labeled, X_labeled_tr)
+    push = _compute_gradient_push_lmnn(omega_1, eta, L, X_labeled, X_labeled_tr, y)
 
     #print("pull:\n{},\npush:\n{}".format(pull, push))
 
-    print("GRAD:\n{},\n".format(np.reshape(pull + push, (4, 4))))
+    #print("GRAD:\n{},\n".format(np.reshape(pull + push, (4, 4))))
 
     return pull + push
 
-def plot(X, colors):
-    plt.scatter(np.asarray(X[:, 1]), np.asarray(X[:, 0]), c=colors)
-
-
 np.set_printoptions(suppress=True)
 
-#compute_loss(L)
-#compute_gradient(L_init)
-
-
-def loss_and_grad(L):
-    global eta
+def loss_and_grad_lmnn(L):
+    #global eta
     L = np.reshape(L, [d,d])
-    X_tr = np.matmul(X, L.T)
+    X_tr = np.matmul(X_labeled, L.T)
 
-    distances = euclidean_distances(X_tr, squared=True)
-    new_eta = compute_eta(distances).todense()
-    eta_diff = eta - new_eta
+    #distances = euclidean_distances(X_tr, squared=True)
+    #new_eta = compute_eta(distances).todense()
+    #eta_diff = eta - new_eta
+    #print("ETA DIFF: {}".format(sum(sum(eta_diff).transpose())))
+    #eta = new_eta
 
-    print("ETA DIFF: {}".format(sum(sum(eta_diff).transpose())))
-    eta = new_eta
-
-    loss = compute_loss(L, X_tr, eta)
-    grad = compute_gradient(L, X_tr, eta)
+    loss = compute_loss_lmnn(L, X_tr, eta)
+    grad = compute_gradient_lmnn(L, X_tr, eta)
 
     return loss, grad.flatten()
 
 
+def _compute_pull_ul(omega_2, eta_ul, X_labeled_tr, X_unlabeled_tr):
+    sum = 0
+    count = 0
+    for i in range(m):
+        for j in range(m_ul):
+            if eta_ul[i, j] == 0:
+                continue
+            dist_ij = norm(X_labeled_tr[i] - X_unlabeled_tr[j])**2
+            count += 1
+            sum += eta_ul[i, j] * dist_ij
+    #print("count pull loss UL: {}".format(count))
+    return omega_2 * sum
+
+def _compute_push_ul(omega_2, eta_ul, X_labeled_tr, X_unlabeled_tr):
+    total = 0
+    impostor_indices = []
+
+    count = 0
+
+    for i in range(m):
+        for j in range(m_ul):
+            for l in range(m):
+                if eta_ul[i, j] == 0 or (1 - y[i, l]) == 0:
+                    continue
+                if l != i :
+                    dist_ij = norm(X_labeled_tr[i] - X_unlabeled_tr[j]) ** 2
+                    dist_il = norm(X_labeled_tr[i] - X_labeled_tr[l]) ** 2
+                    # dist_pos = max(0, 1 + dist_ij - dist_il)
+                    # addend = eta[i, j] * (1 - y[i, l]) * dist_pos
+
+                    if 1 + dist_ij - dist_il > 0:
+                        addend = eta_ul[i, j] * (1 - y[i, l]) * (1 + dist_ij - dist_il)
+                        total += addend
+                        count += 1
+                        #impostor_indices.append((i, j, l))
+                        # print("Adding {} to sum in loss (i,j,l) = ({}, {}, {}) ".format(addend, i, j, l))
+
+    #print("count push UL loss : {}".format(count))
+    return (1 - omega_2) * total
+
+
+def compute_loss_ul(L, X_labeled_tr, X_unlabeled_tr, eta_ul):
+    pull = _compute_pull_ul(omega_2, eta_ul, X_labeled_tr, X_unlabeled_tr)
+    push = _compute_push_ul(omega_2, eta_ul, X_labeled_tr, X_unlabeled_tr)
+
+    #print("loss pull UL {}".format(pull))
+    #print("loss push UL {}".format(push))
+
+    return pull + push
+
+
+def compute_loss_ssc(L, X_labeled_tr, X_unlabeled_tr, eta, eta_ul):
+    loss_lmnn, _ = compute_loss_lmnn(L, X_labeled_tr, eta)
+
+    loss_ul = compute_loss_ul(L, X_labeled_tr, X_unlabeled_tr, eta_ul)
+
+    total = (1 - omega_3) * loss_lmnn + omega_3 * loss_ul
+
+    #print("loss ssc: {}".format(total))
+    return total
+
+def norm_grad_g_ij_ssc(i, j, X_labeled, X_unlabeled, X_labeled_tr, X_unlabeled_tr):
+    g = np.empty([d, d])
+    for n in range(d):
+        for k in range(d):
+
+            grad_add = 2 * (X_labeled_tr[i,n] - X_unlabeled_tr[j,n]) * (X_labeled[i, k] - X_unlabeled[j, k])
+            #print("Adding {} (n,k) = ({}, {})".format(grad_add, n, k))
+
+            g[n,k] = grad_add
+    return g
+
+def norm_grad_g_il_ssc(i, l, X_labeled, X_unlabeled, X_labeled_tr, X_unlabeled_tr):
+    g = np.empty([d, d])
+    for n in range(d):
+        for k in range(d):
+
+            grad_add = 2 * (X_labeled_tr[i,n] - X_labeled_tr[l,n]) * (X_labeled[i, k] - X_labeled[l, k])
+            #print("Adding {} (n,k) = ({}, {})".format(grad_add, n, k))
+
+            g[n,k] = grad_add
+    return g
+
+def _compute_gradient_pull_ul(eta_ul, X_labeled, X_unlabeled, X_labeled_tr, X_unlabeled_tr):
+    total = np.zeros([d, d])
+    count = 0
+    for i in range(m):
+        for j in range(m_ul):
+            if eta_ul[i, j] == 0:
+                continue
+            count += 1
+            total += eta_ul[i, j] * norm_grad_g_ij_ssc(i, j, X_labeled, X_unlabeled, X_labeled_tr, X_unlabeled_tr)
+
+    return omega_2 * total
+
+def _compute_gradient_push_ul(eta_ul, X_labeled, X_unlabeled, X_labeled_tr, X_unlabeled_tr):
+    total = np.zeros([d, d])
+
+    count = 0
+    for i in range(m):
+        for j in range(m_ul):
+            for l in range(m):
+                if eta_ul[i, j] == 0 or (1 - y[i, l]) == 0:
+                    continue
+                if l != i:
+                    dist_ij = norm(X_labeled_tr[i] - X_unlabeled_tr[j]) ** 2
+                    dist_il = norm(X_labeled_tr[i] - X_labeled_tr[l]) ** 2
+
+                    if 1 + dist_ij - dist_il > 0:
+                        g_ij = norm_grad_g_ij_ssc(i, j, X_labeled, X_unlabeled, X_labeled_tr, X_unlabeled_tr)
+                        g_il = norm_grad_g_il_ssc(i, l, X_labeled, X_unlabeled, X_labeled_tr, X_unlabeled_tr)
+                        g_sum = g_ij - g_il
+                        addend = eta_ul[i, j] * (1 - y[i, l]) * g_sum
+
+                        count += 1
+                        total += addend
+
+    return (1 - omega_2) * total
+
+
+def compute_gradient_ssc(L, X_labeled, X_unlabeled, X_labeled_tr, X_unlabeled_tr, eta, eta_ul):
+    grad_lmnn = (1-omega_3) * compute_gradient_lmnn(L, X_labeled, X_labeled_tr, eta)
+
+    pull = _compute_gradient_pull_ul(eta_ul, X_labeled, X_unlabeled, X_labeled_tr, X_unlabeled_tr)
+    push = _compute_gradient_push_ul(eta_ul, X_labeled, X_unlabeled, X_labeled_tr, X_unlabeled_tr)
+
+    print("grad L:\n{}".format(grad_lmnn))
+    print("grad UL:\n{}".format(omega_3 * (pull + push)))
+
+    grad = grad_lmnn + omega_3 * (pull + push)
+
+    #print("grad SSC:\n{}".format(grad))
+
+    return grad
+
+def loss_and_grad_ssc(L):
+    L = np.reshape(L, [d, d])
+
+    X_labeled_tr = np.matmul(X_labeled, L.T)
+    X_unlabeled_tr = np.matmul(X_unlabeled, L.T)
+
+    loss = compute_loss_ssc(L, X_labeled_tr, X_unlabeled_tr, eta, eta_ul)
+
+    print("LOSS: {}".format(loss))
+
+    grad = compute_gradient_ssc(L, X_labeled, X_unlabeled, X_labeled_tr, X_unlabeled_tr, eta, eta_ul)
+
+    #print("GRAD:\n{}".format(grad))
+
+    return loss, grad.flatten()
+
+#compute_loss_ssc(L_init, X_labeled_tr, X_unlabeled_tr, eta, eta_ul)
+
+#compute_gradient_ssc(L_init, X_labeled, X_unlabeled, X_labeled_tr, X_unlabeled_tr, eta, eta_ul)
+
+#compute_gradient_lmnn(L_init, X_labeled_tr, eta)
+
 import scipy.optimize
 
-#X_tr = np.matmul(X, L_init.T)
-#loss, impostor_indices = compute_loss(L_init, X_tr, eta)
-#m = set(impostor_indices)
+L, loss, details = scipy.optimize.fmin_l_bfgs_b(func=loss_and_grad_ssc, x0=L_init.flatten(),
+                                                maxfun=50, maxiter=20, pgtol=0.001)
 
 
-#v = set(v_indices)
-#i_s = v.intersection(m)
-#unique_m = m - i_s
-#unique_v = v - i_s
-
-L, loss, details = scipy.optimize.fmin_l_bfgs_b(func=loss_and_grad, maxfun=20, maxls=5,
-                                                x0=L_init, maxiter=10, pgtol=0.01,
-                                                iprint=-1)
-L = np.reshape(L, [d,d])
-
-# 3637
-# 804.8899999999994, pull: 43.75500000000001
+# Valentin's:
+# 6.5620757775746661
+# array([[ 0.03448816,  0.03459457, -0.07281244, -0.15418275],
+#        [ 0.05694719,  0.05773282, -0.12273826, -0.25848097],
+#        [-0.17870136, -0.18231812,  0.38294122,  0.80592533],
+#        [-0.2458167 , -0.25077252,  0.52878739,  1.11560778]])
 
 
-# v - m
-# {(142, 142, 78), (142, 142, 55), (142, 142, 83), (142, 142, 77), (142, 142, 54),
-#  (54, 76, 103), (106, 113, 93),
-# (142, 142, 66),
-# (128, 111, 70), (71, 97, 123), (127, 149, 94), (51, 86, 116),
-#  (142, 142, 85), (142, 142, 84), (142, 142, 70), (142, 142, 56), (142, 142, 68), (142, 142, 63), (142, 142, 91),
-#  (54, 76, 141), (66, 96, 146), (116, 147, 91), (51, 75, 137),
-#  (142, 142, 73), (142, 142, 72)}
-
-# loss 152.92237
-# [ 0.07906213,  0.40198965, -0.45669375, -1.03440687],
-#        [ 0.12463876,  0.44083368, -0.57865573, -1.20659245],
-#        [-0.30278305, -1.18589183,  1.47158055,  3.2036171 ],
-#        [-0.33346051, -1.23635023,  1.5694044 ,  3.27713416]]
-
-import sys
-sys.path.insert(0, './pylmnn-master')
-import pylmnn
-from pylmnn.lmnn import LargeMarginNearestNeighbor as LMNN
-from pylmnn.plots import plot_comparison
-
-
-#plot_comparison(L, X, labels, dim_pref=3)
-
-L_v = np.asarray([[ 1.66506679,  0.23159616,  0.05130396, -0.31491682],
-       [ 0.21348119,  1.3123109 , -0.4564415 ,  0.20844194],
-       [-0.06307738, -0.46742118,  1.3057125 ,  0.7407108 ],
-       [-0.34575282,  0.18681816,  0.61021362,  1.63416581]])
-
-L_m1 = np.asarray([[ 0.07906213,  0.40198965, -0.45669375, -1.03440687],
-       [ 0.12463876,  0.44083368, -0.57865573, -1.20659245],
-       [-0.30278305, -1.18589183,  1.47158055,  3.2036171 ],
-       [-0.33346051, -1.23635023,  1.5694044 ,  3.27713416]])
-#plot_comparison(L_v, X, labels, dim_pref=3)
-
-# push: 807, 266, 240, 203, 189, 156, 132, 142, 127, 131, 128, 126, 126, 125
-# pull:  43,  80,  82,  86,  82,  51,  60,  42,  40,  27,  28,  27,  27,  27
+# Oskar's:
+# 6.56209810987359
+# array([[ 0.04118917,  0.04129688, -0.08899836, -0.18772006],
+#        [ 0.05966518,  0.0605011 , -0.12575836, -0.2673461 ],
+#        [-0.1730255 , -0.17579962,  0.37077371,  0.78278925],
+#        [-0.24993164, -0.25359375,  0.53329826,  1.12832529]])
