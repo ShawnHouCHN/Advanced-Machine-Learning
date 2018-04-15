@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.optimize import minimize
+from scipy.optimize import minimize, fmin_l_bfgs_b
 from scipy.sparse import csr_matrix
 from sklearn.metrics.pairwise import euclidean_distances
 from sklearn.neighbors import KNeighborsClassifier
@@ -10,17 +10,28 @@ from sklearn.metrics import accuracy_score
 
 class LargeMarginNearestNeighbor(KNeighborsClassifier):
 
-    def __init__(self, L=None, n_neighbors=4, method='L-BFGS-B', options={'disp': True}, omega=np.array([0.5,0.5,0.5])):
-
+    def __init__(self, L=None, n_neighbors=4, method='L-BFGS-B', options={'disp': True}, max_iter=200, tol=1e-5, omega=0.5):
+        
+        """Largest Margin Nearest Neighbor. Train a transformation on X to fit in KNN
+        Parameters
+        ----------
+        omega: weight parameter
+        """
+        
         super(LargeMarginNearestNeighbor, self).__init__(n_neighbors=n_neighbors)
         # Number of neighbors
         self.k = n_neighbors
 
         self.method = method
         self.options = options
+        self.options['maxiter'] = max_iter
+        self.max_iter = max_iter
+        
         
         self.L_init = L
-
+        
+        self.tol=tol
+        self.omega = omega
         # Defining the "global" variables in the class, some will hopefully disapear during code optimization
         self.X = None
         self.y = None
@@ -34,7 +45,7 @@ class LargeMarginNearestNeighbor(KNeighborsClassifier):
 
         self.X = X
         self.y = y
-
+              
         # number of observations
         self.m = self.X.shape[0]
 
@@ -51,10 +62,14 @@ class LargeMarginNearestNeighbor(KNeighborsClassifier):
 
         # find indexes of k closest same class points in initial space
         # now saved as sparse matrix as well
+        
         self.dif_class_matrix = np.zeros(shape=(self.m, self.m))
         self.eta_index = np.empty(shape=(self.m, self.k), dtype=int)
         eta_row = np.repeat(range(self.m), self.k)
         eta_col = []
+       
+        
+        
         for i in range(self.m):
             # take points that belong to different class than point i
             dif_class = y != y[i]
@@ -67,12 +82,17 @@ class LargeMarginNearestNeighbor(KNeighborsClassifier):
             eta_col = np.append(eta_col,point_distances.argsort()[1:self.k + 1])
             self.eta_index[i,] = point_distances.argsort()[1:self.k + 1]
         self.eta = csr_matrix((np.repeat(1, self.m*self.k), (eta_row, eta_col)), shape=(self.m, self.m))
+        
+        #res = minimize(fun=self.loss_gradient, x0=self.L_init, method=self.method,
+        #               jac=self.loss_simple_jac, options=self.options)
+        
+        L, loss, details = fmin_l_bfgs_b(func=self.loss_gradient, x0=self.L_init, bounds=None,
+                                                  m=100, pgtol=self.tol, maxfun=500*self.max_iter,
+                                                  maxiter=self.max_iter, disp=4, callback=None)
+        
+        L_optim = L.reshape((self.d, self.d))
 
-        res = minimize(fun=self.loss_simple, x0=self.L_init, method=self.method,
-                       jac=self.loss_simple_jac, options=self.options)
-        L_optim = res.x.reshape((self.d, self.d))
-
-        L_optim_flat = np.reshape(L_optim, (self.d**2, ))
+        #L_optim_flat = np.reshape(L_optim, (self.d**2, ))
 
         self.L_= L_optim
         # alternative PCA  # Why the PCA?
@@ -142,7 +162,76 @@ class LargeMarginNearestNeighbor(KNeighborsClassifier):
         return X.dot(self.L_.T)
     
     
-    
+    ################################################# Xiaoshen Implemntation ############################################################
+    def loss_gradient(self, L_in):
+
+        # transform L from vector back to matrix
+        L = np.reshape(L_in,(self.d, self.d))
+        # calculate linear transformation X L'
+        X_transformed = np.dot(np.asmatrix(self.X), np.asmatrix(L).T)
+
+        # calculate pairwise distances between all samples in transformed X
+        distance_matrix = euclidean_distances(X_transformed, squared=True)
+
+        # LMNN loss function
+        omega_1 = self.omega
+        
+        # calculate jacobian elementwise
+        jac = np.zeros((self.d, self.d))
+
+        # PULL - step
+        neighbour_distance_matrix = self.eta.multiply(distance_matrix)
+        pull_sum = omega_1 * neighbour_distance_matrix.sum()
+
+        # auxillary distances to DIFFERENT CLASS points
+        distance_matrix_aux = np.multiply(distance_matrix,self.dif_class_matrix)
+        distance_matrix_aux[distance_matrix_aux == 0] = 10 * np.amax(distance_matrix_aux)
+
+        impostor_num = 0
+        i_indexes = []
+        j_indexes = []
+        impostor_indexes = []
+        for i in range(self.m):
+            for j in self.eta_index[i,]:    
+                reference_distance = distance_matrix[i, j] + 1  # distance_matrix[i,j] + 1
+                ##impostor_num += sum(distance_matrix_aux[i, ] <= reference_distance)  ##Valentine
+                ##impostors = [j for j, x in enumerate(distance_matrix_aux[i, ] <= reference_distance) if x]  ##Valentine
+                impostors, = np.where((distance_matrix_aux[i, ] - reference_distance)<= 0 )
+                impostor_num += np.size(impostors)
+                i_indexes = np.append(i_indexes, np.repeat(i, np.size(impostors)))
+                j_indexes = np.append(j_indexes, np.repeat(j, np.size(impostors)))
+                impostor_indexes = np.append(impostor_indexes, impostors)
+                
+                if j < self.k: 
+                    index_j = self.eta_index[i, j]
+                    if np.size(impostors) > 0:
+                        for imp in impostors:
+                            p1 = 2 * np.dot((X_transformed[i, ].T - X_transformed[index_j, ].T), np.reshape((self.X[i, ] - self.X[index_j, ]), (1, self.d)))
+                            p2 = 2 * np.dot((X_transformed[i, ].T - X_transformed[imp, ].T), np.reshape((self.X[i, ] - self.X[imp, ]), (1, self.d)))
+                            jac += (1 - omega_1) * (p1 - p2)
+                        jac += omega_1 * 2 * np.dot((X_transformed[i, ].T - X_transformed[index_j, ].T), np.reshape((self.X[i, ] - self.X[index_j, ]), (1, self.d)))
+                    # if there is NO impostors for given pair x_i and x_j
+                    else:
+                        jac += omega_1 * 2 * np.dot((X_transformed[i, ].T - X_transformed[index_j, ].T), np.reshape((self.X[i, ] - self.X[index_j, ]), (1, self.d)))
+
+        #jac = np.reshape(jac, (1, self.d**2))                
+                
+        i_indexes = i_indexes.astype(int)
+        j_indexes = j_indexes.astype(int)
+        impostor_indexes = impostor_indexes.astype(int)
+        push_sum = 0
+        for n in range(impostor_num):
+            i = i_indexes[n]
+            j = j_indexes[n]
+            l = impostor_indexes[n]
+            push_sum += (1 + distance_matrix[i, j] - distance_matrix[i, l])
+        push_sum = (1 - omega_1) * push_sum
+        total_loss = push_sum + pull_sum   
+        
+        
+        return total_loss, jac.flatten()
+   ################################################################################################################################################
+
     def loss_simple(self, L_in):
 
         # transform L from vector back to matrix
@@ -154,7 +243,7 @@ class LargeMarginNearestNeighbor(KNeighborsClassifier):
         distance_matrix = euclidean_distances(X_transformed, squared=True)
 
         # LMNN loss function
-        omega_1 = 0.5
+        omega_1 = self.omega
 
         # PULL - step
         neighbour_distance_matrix = self.eta.multiply(distance_matrix)
@@ -176,7 +265,8 @@ class LargeMarginNearestNeighbor(KNeighborsClassifier):
                 i_indexes = np.append(i_indexes, np.repeat(i, np.size(impostors)))
                 j_indexes = np.append(j_indexes, np.repeat(j, np.size(impostors)))
                 impostor_indexes = np.append(impostor_indexes, impostors)
-
+               
+                
         i_indexes = i_indexes.astype(int)
         j_indexes = j_indexes.astype(int)
         impostor_indexes = impostor_indexes.astype(int)
@@ -188,26 +278,13 @@ class LargeMarginNearestNeighbor(KNeighborsClassifier):
             l = impostor_indexes[n]
             push_sum += (1 + distance_matrix[i, j] - distance_matrix[i, l])
 
-        # # Push step
-        # # create m by k matrix, which will have distances to k closest neighbours for all m elements
-        # reference_distances_array = neighbour_distance_matrix.toarray()
-        # reference_distances_array.sort(axis=1)
-        # reference_distances_array = reference_distances_array[:,range(m-k,m)]
-
-        # push_sum = 0
-        # # calculate push part in k steps
-        # act = 0
-        # for i in range(k):
-        #     p = impostors_distances(reference_distances_array[:,i],distance_matrix).sum()
-        #     if p > 0:
-        #         act += 1
-        #     push_sum += p
 
         push_sum = (1 - omega_1) * push_sum
 
         total_loss = push_sum + pull_sum
 
         return total_loss
+    
 
     def loss_simple_jac(self, L_in):
 
@@ -228,7 +305,7 @@ class LargeMarginNearestNeighbor(KNeighborsClassifier):
         jac = np.zeros((self.d, self.d))
 
         # omega weight here
-        omega_1 = 0.5
+        omega_1 = self.omega
 
         # most stupid loops ever
         for i in range(self.m):
