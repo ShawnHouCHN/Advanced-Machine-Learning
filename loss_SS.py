@@ -151,6 +151,8 @@ def loss_ss(l_in):
 
     _total_loss = omega_3 *(_pull_sum + _push_sum) + (1 - omega_3) * (_pull_sum_ul + _push_sum_ul)
 
+    print(_total_loss)
+
     return _total_loss
 
 
@@ -217,22 +219,21 @@ def loss_ss_jac(l_in):
                 _jac_ul += omega_2 * 2 * np.dot((_X_transformed[i,].T - _X_transformed_ul[_index_j_ul,].T),np.reshape((X_labeled[i,] - X_unlabeled[_index_j_ul,]),(1,d)))
 
     _jac_total = omega_3 * _jac + (1 - omega_3) * _jac_ul
-    _jac_total = np.reshape(_jac_total,(1,d**2))
+    #_jac_total = np.reshape(_jac_total,(1,d**2))
 
     return _jac_total
 
+def loss_grad(L_in):
+    loss = loss_ss(L_in)
+    grad = loss_ss_jac(L_in)
 
-# optimization test
-# initial L - just identity
+    return loss, grad.flatten()
+
+
+
 L_init = np.eye(d)
-L_init = np.reshape(L_init, (d**2,))
+import scipy.optimize
 
-res = minimize(loss_ss, L_init, method='L-BFGS-B',jac=loss_ss_jac,options={'disp': True})
-L_optim = res.x.reshape((d,d))
-L_optim_flat = np.reshape(L_optim,(d**2,))
+L, loss, details = scipy.optimize.fmin_l_bfgs_b(func=loss_grad, x0=L_init.flatten(),
+                                                maxfun=50, maxiter=20, pgtol=0.001)
 
-loss_ss(L_init)
-loss_ss(L_optim_flat)
-
-loss_ss_jac(L_init)
-loss_ss_jac(L_optim_flat)

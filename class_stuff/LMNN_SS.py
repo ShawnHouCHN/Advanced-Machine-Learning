@@ -5,6 +5,7 @@ from sklearn.metrics.pairwise import euclidean_distances
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.utils.validation import check_is_fitted, check_array
 from sklearn.metrics import accuracy_score
+from scipy.optimize import minimize, fmin_l_bfgs_b
 
 
 class SemiSupervisedLargeMarginNearestNeighbor(KNeighborsClassifier):
@@ -44,8 +45,7 @@ class SemiSupervisedLargeMarginNearestNeighbor(KNeighborsClassifier):
     def predict(self, X):
 
         # Check if fit had been called
-        check_is_fitted(self, ['X', 'y'])
-
+        check_is_fitted(self, ['X_labeled', 'X_unlabeled', 'y'])
         # Apply the fitted metric L to the data X
         # X_transformed = X.dot(self.L.T)
 
@@ -111,20 +111,34 @@ class SemiSupervisedLargeMarginNearestNeighbor(KNeighborsClassifier):
             # remember indexes of k closest unlabeled neighbours for point i
             eta_col_ul = np.append(eta_col_ul, point_distances.argsort()[0:self.k])
             self.eta_index_ul[i, ] = point_distances.argsort()[0:self.k]
+
         self.eta_ul = csr_matrix((np.repeat(1, self.m * self.k), (eta_row_ul, eta_col_ul)), shape=(self.m, self.m_ul))
 
-        L = minimize(fun=self.loss_ss, x0=self.L_init, method=self.method, jac=self.loss_ss_jac,
-                     options=self.options)
+        #L = minimize(fun=self.loss_ss, x0=self.L_init, method=self.method, jac=self.loss_ss_jac,
+        #             options=self.options)
 
-        L_optim = L.x.reshape((self.d, self.d))
+       # L, loss, details = fmin_l_bfgs_b(func=self.loss_gradient, x0=self.L_init.flatten(), bounds=None,
+       #                                  m=100, pgtol=self.tol, maxfun=500*self.max_iter,
+        #                                 maxiter=self.max_iter, disp=4, callback=None)
+        L, loss, details = fmin_l_bfgs_b(func=self.loss_gradient, x0=self.L_init.flatten(),
+                                                        maxfun=50, maxiter=20, pgtol=0.001)
+
+        L_optim = np.reshape(L, [self.d, self.d])
 
         self.L = L_optim
+        self.loss = loss
+        self.details = details
 
-        # Don't know what to do here - Combine the observations into one matrix again, but what about the y then?
-        #  - Maybe X and y are supposed to be the original X and y, before splitting into labeled and unlabeled?
-        super(SemiSupervisedLargeMarginNearestNeighbor, self).fit(self.transform(X), y)
+        super(SemiSupervisedLargeMarginNearestNeighbor, self).fit(self.transform(X_labeled), y)
 
         return self
+
+    def loss_gradient(self, L_in):
+        loss = self.loss_ss(L_in)
+        grad = self.loss_ss_jac(L_in)
+
+        return loss, grad.flatten()
+
 
     def transform(self, X):
 
@@ -287,7 +301,7 @@ class SemiSupervisedLargeMarginNearestNeighbor(KNeighborsClassifier):
                                                     np.reshape((self.X_labeled[i, ] - self.X_unlabeled[index_j_ul, ]), (1, self.d)))
 
         jac_total = self.omega[2] * jac + (1 - self.omega[2]) * jac_ul
-        jac_total = np.reshape(jac_total, (1, self.d ** 2))
+        #jac_total = np.reshape(jac_total, (1, self.d ** 2))
 
         return jac_total
 
@@ -298,7 +312,7 @@ class SemiSupervisedLargeMarginNearestNeighbor(KNeighborsClassifier):
     def predict_proba(self, X):
 
         # Check if fit had been called
-        check_is_fitted(self, ['X', 'y'])
+        check_is_fitted(self, ['X_labeled', 'X_unlabeled', 'y'])
         probabilities = super(SemiSupervisedLargeMarginNearestNeighbor, self).predict_proba(self.transform(X))
 
         return probabilities
