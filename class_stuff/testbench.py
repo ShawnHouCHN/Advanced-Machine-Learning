@@ -1,18 +1,26 @@
-from LMNN import LMNN_C
+from LMNN_SS import SemiSupervisedLargeMarginNearestNeighbor
 from sklearn.datasets import load_iris
+import numpy as np
 
 # data
 dataset = load_iris()
 X, y = dataset.data, dataset.target
 
-nn = LMNN_C()
+############ SS part ##
+X_labeled = np.delete(X, (range(40), range(50, 90), range(100, 140)), 0)
+y = np.delete(y, (range(40), range(50, 90), range(100, 140)))
+X_unlabeled = np.delete(X,(range(40,50),range(90,100),range(140,150)),0)
+#######################
 
-a, b = nn.LMNN_fit(X, y)
+nn = SemiSupervisedLargeMarginNearestNeighbor()
 
-print(nn.loss_simple(b))
-# print(nn.loss_simple_jac(b))
+nn.fit(X, y)
 
-# from loss_manual_v2 - Kopi.py -> 339.295890934583
-# from testbench.py and LMNN.py -> 339.295890934583
-#
-# that means so far so good xD
+c = nn.predict(X)
+# print(c)
+
+d = nn.score(y, c)
+print(d)
+
+e = nn.predict_proba(X)
+print(e)
