@@ -11,7 +11,7 @@ from scipy.optimize import minimize, fmin_l_bfgs_b
 class SemiSupervisedLargeMarginNearestNeighbor(KNeighborsClassifier):
 
     def __init__(self, L=None, n_neighbors=4, method='L-BFGS-B', options={'disp': True},
-                 omega=np.array([0.5, 0.5, 0.5]), max_iter=200, tol=1e-5):
+                 omega0=0.5,omega1=0.5,omega2=0.5, max_iter=200, tol=1e-5):
 
         super(SemiSupervisedLargeMarginNearestNeighbor, self).__init__(n_neighbors=n_neighbors)
 
@@ -21,7 +21,7 @@ class SemiSupervisedLargeMarginNearestNeighbor(KNeighborsClassifier):
         self.method = method
         self.options = options
         self.options['maxiter'] = max_iter
-        self.omega = omega
+        self.omega = np.array([omega0, omega1, omega2])
         self.max_iter = max_iter
 
         self.L_init = L
