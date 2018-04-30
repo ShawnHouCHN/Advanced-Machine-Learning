@@ -11,7 +11,7 @@ from scipy.optimize import minimize, fmin_l_bfgs_b
 class SemiSupervisedLargeMarginNearestNeighbor(KNeighborsClassifier):
 
     def __init__(self, L=None, n_neighbors=4, method='L-BFGS-B', options={'disp': True},
-                 omega0=0.5,omega1=0.5,omega2=0.5, max_iter=200, tol=1e-5):
+                 omega0=0.5,omega1=0.5,omega2=0.5, X_unlabeled=None, max_iter=200, tol=1e-5):
 
         super(SemiSupervisedLargeMarginNearestNeighbor, self).__init__(n_neighbors=n_neighbors)
 
@@ -21,7 +21,12 @@ class SemiSupervisedLargeMarginNearestNeighbor(KNeighborsClassifier):
         self.method = method
         self.options = options
         self.options['maxiter'] = max_iter
-        self.omega = np.array([omega0, omega1, omega2])
+        self.omega0=omega0
+        self.omega1=omega1
+        self.omega2=omega2
+        self.X_unlabeled = X_unlabeled
+        #self.omega = [omega0, omega1, omega2]
+        #print ("Hello ", self.omega )
         self.max_iter = max_iter
 
         self.L_init = L
@@ -31,7 +36,6 @@ class SemiSupervisedLargeMarginNearestNeighbor(KNeighborsClassifier):
 
         # Defining the "global" variables in the class, some will hopefully disappear during code optimization
         self.X_labeled = None
-        self.X_unlabeled = None
         self.y = None
         self.m = None
         self.m_ul = None
@@ -75,10 +79,10 @@ class SemiSupervisedLargeMarginNearestNeighbor(KNeighborsClassifier):
         return X.dot(self.L.T)
     
 
-    def fit(self, X_labeled, X_unlabeled, y):
+    def fit(self, X_labeled, y):
 
         self.X_labeled = X_labeled
-        self.X_unlabeled = X_unlabeled
+        
         self.y = y
 
         # number of observations in labeled set
@@ -176,11 +180,11 @@ class SemiSupervisedLargeMarginNearestNeighbor(KNeighborsClassifier):
 
         # PULL step - labeled part
         neighbour_distance_matrix = self.eta.multiply(distance_matrix)
-        pull_sum = self.omega[0] * neighbour_distance_matrix.sum()
+        pull_sum = self.omega0 * neighbour_distance_matrix.sum()
 
         # PULL step - unlabeled part
         neighbour_distance_matrix_ul = self.eta_ul.multiply(distance_matrix_ul)
-        pull_sum_ul = self.omega[1] * neighbour_distance_matrix_ul.sum()
+        pull_sum_ul = self.omega1 * neighbour_distance_matrix_ul.sum()
 
         # auxillary distances to DIFFERENT CLASS points in labeled dataset
         distance_matrix_aux = np.multiply(distance_matrix, self.dif_class_matrix)
@@ -213,11 +217,11 @@ class SemiSupervisedLargeMarginNearestNeighbor(KNeighborsClassifier):
                         for imp in impostors:
                             p1 = 2 * np.dot((X_transformed[i, ].T - X_transformed[index_j, ].T), np.reshape((self.X_labeled[i, ] - self.X_labeled[index_j, ]), (1, self.d)))
                             p2 = 2 * np.dot((X_transformed[i, ].T - X_transformed[imp, ].T), np.reshape((self.X_labeled[i, ] - self.X_labeled[imp, ]), (1, self.d)))
-                            jac += (1 - self.omega[0]) * (p1 - p2)
-                        jac += self.omega[0] * 2 * np.dot((X_transformed[i, ].T - X_transformed[index_j, ].T), np.reshape((self.X_labeled[i, ] - self.X_labeled[index_j, ]), (1, self.d)))
+                            jac += (1 - self.omega0) * (p1 - p2)
+                        jac += self.omega0 * 2 * np.dot((X_transformed[i, ].T - X_transformed[index_j, ].T), np.reshape((self.X_labeled[i, ] - self.X_labeled[index_j, ]), (1, self.d)))
                 # if there is NO impostors for given pair x_i and x_j
                     else:
-                        jac += self.omega[0] * 2 * np.dot((X_transformed[i, ].T - X_transformed[index_j, ].T), np.reshape((self.X_labeled[i, ] - self.X_labeled[index_j, ]), (1, self.d)))
+                        jac += self.omega0 * 2 * np.dot((X_transformed[i, ].T - X_transformed[index_j, ].T), np.reshape((self.X_labeled[i, ] - self.X_labeled[index_j, ]), (1, self.d)))
         #jac = np.reshape(jac, (1, self.d**2))                
                 
         i_indexes = i_indexes.astype(int)
@@ -230,7 +234,7 @@ class SemiSupervisedLargeMarginNearestNeighbor(KNeighborsClassifier):
             l = impostor_indexes[n]
             push_sum += (1 + distance_matrix[i, j] - distance_matrix[i, l])
         
-        push_sum = (1 - self.omega[0]) * push_sum
+        push_sum = (1 - self.omega0) * push_sum
         
         
         
@@ -262,15 +266,15 @@ class SemiSupervisedLargeMarginNearestNeighbor(KNeighborsClassifier):
                                          np.reshape((self.X_labeled[i, ] - self.X_unlabeled[index_j_ul, ]), (1, self.d)))
                         p2 = 2 * np.dot((X_transformed[i, ].T - X_transformed[imp, ].T),
                                          np.reshape((self.X_labeled[i, ] - self.X_labeled[imp, ]), (1, self.d)))
-                        jac_ul += (1 - self.omega[1]) * (p1 - p2)
-                    jac_ul += self.omega[1] * 2 * np.dot((X_transformed[i, ].T - X_transformed_ul[index_j_ul, ].T),
+                        jac_ul += (1 - self.omega1) * (p1 - p2)
+                    jac_ul += self.omega1 * 2 * np.dot((X_transformed[i, ].T - X_transformed_ul[index_j_ul, ].T),
                                                     np.reshape((self.X_labeled[i, ] - self.X_unlabeled[index_j_ul, ]), (1, self.d)))
                 # if there is NO impostors for given pair x_i and x_j
                 else:
-                    jac_ul += self.omega[1] * 2 * np.dot((X_transformed[i, ].T - X_transformed_ul[index_j_ul, ].T),
+                    jac_ul += self.omega1 * 2 * np.dot((X_transformed[i, ].T - X_transformed_ul[index_j_ul, ].T),
                                                     np.reshape((self.X_labeled[i, ] - self.X_unlabeled[index_j_ul, ]), (1, self.d)))
 
-        jac_total = self.omega[2] * jac + (1 - self.omega[2]) * jac_ul
+        jac_total = self.omega2 * jac + (1 - self.omega2) * jac_ul
                 
 
         i_indexes_ul = i_indexes_ul.astype(int)
@@ -284,9 +288,9 @@ class SemiSupervisedLargeMarginNearestNeighbor(KNeighborsClassifier):
             l_ul = impostor_indexes_ul[n]
             push_sum_ul += (1 + distance_matrix_ul[i_ul, j_ul] - distance_matrix[i_ul, l_ul])
 
-        push_sum_ul = (1 - self.omega[1]) * push_sum_ul
+        push_sum_ul = (1 - self.omega1) * push_sum_ul
 
-        total_loss = self.omega[2] * (pull_sum + push_sum) + (1 - self.omega[2]) * (pull_sum_ul + push_sum_ul)
+        total_loss = self.omega2 * (pull_sum + push_sum) + (1 - self.omega2) * (pull_sum_ul + push_sum_ul)
 
         return total_loss, self.L.dot(jac_total).flatten()
         
@@ -319,11 +323,11 @@ class SemiSupervisedLargeMarginNearestNeighbor(KNeighborsClassifier):
 
         # PULL step - labeled part
         neighbour_distance_matrix = self.eta.multiply(distance_matrix)
-        pull_sum = self.omega[0] * neighbour_distance_matrix.sum()
+        pull_sum = self.omega0 * neighbour_distance_matrix.sum()
 
         # PULL step - unlabeled part
         neighbour_distance_matrix_ul = self.eta_ul.multiply(distance_matrix_ul)
-        pull_sum_ul = self.omega[1] * neighbour_distance_matrix_ul.sum()
+        pull_sum_ul = self.omega1 * neighbour_distance_matrix_ul.sum()
 
         # auxillary distances to DIFFERENT CLASS points in labeled dataset
         distance_matrix_aux = np.multiply(distance_matrix, self.dif_class_matrix)
@@ -354,7 +358,7 @@ class SemiSupervisedLargeMarginNearestNeighbor(KNeighborsClassifier):
             l = impostor_indexes[n]
             push_sum += (1 + distance_matrix[i, j] - distance_matrix[i, l])
 
-        push_sum = (1 - self.omega[0]) * push_sum
+        push_sum = (1 - self.omega0) * push_sum
 
         # PUSH step - unlabeled part
         impostor_num_ul = 0
@@ -381,9 +385,9 @@ class SemiSupervisedLargeMarginNearestNeighbor(KNeighborsClassifier):
             l_ul = impostor_indexes_ul[n]
             push_sum_ul += (1 + distance_matrix_ul[i_ul, j_ul] - distance_matrix[i_ul, l_ul])
 
-        push_sum_ul = (1 - self.omega[1]) * push_sum_ul
+        push_sum_ul = (1 - self.omega1) * push_sum_ul
 
-        total_loss = self.omega[2] * (pull_sum + push_sum) + (1 - self.omega[2]) * (pull_sum_ul + push_sum_ul)
+        total_loss = self.omega2 * (pull_sum + push_sum) + (1 - self.omega2) * (pull_sum_ul + push_sum_ul)
 
         return total_loss
 
@@ -423,11 +427,11 @@ class SemiSupervisedLargeMarginNearestNeighbor(KNeighborsClassifier):
                     for imp in impostors:
                         p1 = 2 * np.dot((X_transformed[i, ].T - X_transformed[index_j, ].T), np.reshape((self.X_labeled[i, ] - self.X_labeled[index_j, ]), (1, self.d)))
                         p2 = 2 * np.dot((X_transformed[i, ].T - X_transformed[imp, ].T), np.reshape((self.X_labeled[i, ] - self.X_labeled[imp, ]), (1, self.d)))
-                        jac += (1 - self.omega[0]) * (p1 - p2)
-                    jac += self.omega[0] * 2 * np.dot((X_transformed[i, ].T - X_transformed[index_j, ].T), np.reshape((self.X_labeled[i, ] - self.X_labeled[index_j, ]), (1, self.d)))
+                        jac += (1 - self.omega0) * (p1 - p2)
+                    jac += self.omega0 * 2 * np.dot((X_transformed[i, ].T - X_transformed[index_j, ].T), np.reshape((self.X_labeled[i, ] - self.X_labeled[index_j, ]), (1, self.d)))
                 # if there is NO impostors for given pair x_i and x_j
                 else:
-                    jac += self.omega[0] * 2 * np.dot((X_transformed[i, ].T - X_transformed[index_j, ].T), np.reshape((self.X_labeled[i, ] - self.X_labeled[index_j, ]), (1, self.d)))
+                    jac += self.omega0 * 2 * np.dot((X_transformed[i, ].T - X_transformed[index_j, ].T), np.reshape((self.X_labeled[i, ] - self.X_labeled[index_j, ]), (1, self.d)))
 
         # unlabeled part
         for i in range(self.m):
@@ -445,15 +449,15 @@ class SemiSupervisedLargeMarginNearestNeighbor(KNeighborsClassifier):
                                          np.reshape((self.X_labeled[i, ] - self.X_unlabeled[index_j_ul, ]), (1, self.d)))
                         p2 = 2 * np.dot((X_transformed[i, ].T - X_transformed[imp, ].T),
                                          np.reshape((self.X_labeled[i, ] - self.X_labeled[imp, ]), (1, self.d)))
-                        jac_ul += (1 - self.omega[1]) * (p1 - p2)
-                    jac_ul += self.omega[1] * 2 * np.dot((X_transformed[i, ].T - X_transformed_ul[index_j_ul, ].T),
+                        jac_ul += (1 - self.omega1) * (p1 - p2)
+                    jac_ul += self.omega1 * 2 * np.dot((X_transformed[i, ].T - X_transformed_ul[index_j_ul, ].T),
                                                     np.reshape((self.X_labeled[i, ] - self.X_unlabeled[index_j_ul, ]), (1, self.d)))
                 # if there is NO impostors for given pair x_i and x_j
                 else:
-                    jac_ul += self.omega[1] * 2 * np.dot((X_transformed[i, ].T - X_transformed_ul[index_j_ul, ].T),
+                    jac_ul += self.omega1 * 2 * np.dot((X_transformed[i, ].T - X_transformed_ul[index_j_ul, ].T),
                                                     np.reshape((self.X_labeled[i, ] - self.X_unlabeled[index_j_ul, ]), (1, self.d)))
 
-        jac_total = self.omega[2] * jac + (1 - self.omega[2]) * jac_ul
+        jac_total = self.omega2 * jac + (1 - self.omega2) * jac_ul
         #jac_total = np.reshape(jac_total, (1, self.d ** 2))
 
         return jac_total
