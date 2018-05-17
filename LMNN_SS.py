@@ -32,6 +32,9 @@ class SemiSupervisedLargeMarginNearestNeighbor(KNeighborsClassifier):
         self.L_init = L
         self.L = L
 
+        # save optimization progress
+        self.iter_progres = np.empty((0))
+        
         self.tol = tol
 
         # Defining the "global" variables in the class, some will hopefully disappear during code optimization
@@ -142,10 +145,18 @@ class SemiSupervisedLargeMarginNearestNeighbor(KNeighborsClassifier):
 
         #L = minimize(fun=self.loss_ss, x0=self.L_init, method=self.method, jac=self.loss_ss_jac,
         #             options=self.options)
+        
+        
+        def callbackF(Xi):
+            # print(self.loss_gradient(Xi)[0])
+            self.iter_progres = np.append(self.iter_progres,self.loss_gradient(Xi)[0])
+       
+        # print(self.loss_gradient(self.L_init)[0])
+        self.iter_progres = np.append(self.iter_progres,self.loss_gradient(self.L_init)[0])
 
         L, loss, details = fmin_l_bfgs_b(func=self.loss_gradient, x0=self.L_init.flatten(), bounds=None,
                                          m=100, pgtol=self.tol, maxfun=500*self.max_iter,
-                                         maxiter=self.max_iter, disp=4, callback=None)
+                                         maxiter=self.max_iter, disp=4, callback=callbackF)
         #L, loss, details = fmin_l_bfgs_b(func=self.loss_gradient, x0=self.L_init.flatten(),
         #                                                maxfun=50, maxiter=20, pgtol=0.001)
 
@@ -397,10 +408,16 @@ class SemiSupervisedLargeMarginNearestNeighbor(KNeighborsClassifier):
         # L = minimize(fun=self.loss_ss, x0=self.L_init, method=self.method, jac=self.loss_ss_jac,
         #             options=self.options)
 
+        def callbackF(Xi):
+            # print(self.loss_gradient(Xi)[0])
+            self.iter_progres = np.append(self.iter_progres,self.loss_gradient(Xi)[0])
+       
+        # print(self.loss_gradient(self.L_init)[0])
+        self.iter_progres = np.append(self.iter_progres,self.loss_gradient(self.L_init)[0])
 
         L, loss, details = fmin_l_bfgs_b(func=self.loss_gradient, x0=self.L_init.flatten(), bounds=None,
                                          m=100, pgtol=self.tol, maxfun=500 * self.max_iter,
-                                         maxiter=self.max_iter, disp=4, callback=None)
+                                         maxiter=self.max_iter, disp=4, callback=callbackF)
 
         # L, loss, details = fmin_l_bfgs_b(func=self.loss_gradient, x0=self.L_init.flatten(),
         #                                                maxfun=50, maxiter=20, pgtol=0.001)
