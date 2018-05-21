@@ -55,8 +55,8 @@ y_test=np.asarray(y_test)
 X_all=np.concatenate((X_train, X_test), axis=0)
 y_all=np.concatenate((y_train, y_test), axis=0)
 
-my_model = PCA(n_components=0.95, svd_solver='full')
-X_all=my_model.fit_transform(X_all)
+#my_model = PCA(n_components=0.95, svd_solver='full')
+#X_all=my_model.fit_transform(X_all)
 
 X_train, X_test, y_train, y_test = train_test_split(X_all, y_all, test_size=2000, stratify=y_all, random_state=42)
 X_train_labelled, X_train_rest, y_train_labelled, y_train_rest = train_test_split(X_train, y_train, train_size=200, stratify=y_train, random_state=42)
@@ -71,24 +71,54 @@ print("X_train_unlabelled: {}".format(X_train_unlabelled.shape))
 
 ##### LMNN TUNNING USPS ########  (Long execution!!)
 #lmnn_param_list = [2,5,10,50,100]
-lmnn_param_list = [2,5,10,30,50,75,100,200]
-lmnn_param_grid = {'max_iter': lmnn_param_list}
-lmnnclf = GridSearchCV(LargeMarginNearestNeighbor(), lmnn_param_grid, cv=10, n_jobs=16, verbose=-1)
+#lmnn_param_list = [2,5,10,30,50,75,100,200]
+#lmnn_param_grid = {'max_iter': lmnn_param_list}
+#lmnnclf = GridSearchCV(LargeMarginNearestNeighbor(), lmnn_param_grid, cv=10, n_jobs=16, verbose=-1)
+#start=time.time()
+#lmnnclf.fit(X_train_labelled, y_train_labelled)
+#end=time.time()
+#print("time: {}".format(end-start))
+#print("LMNN Best parameters set found on development set:")
+#print(lmnnclf.best_params_)
+#print("Grid scores on development set:")
+#means = lmnnclf.cv_results_['mean_test_score']
+#stds = lmnnclf.cv_results_['std_test_score']
+#for mean, std, params in zip(means, stds, lmnnclf.cv_results_['params']):
+#    print("%0.3f (+/-%0.03f) for %r"
+#          % (mean, std * 2, params))
+#
+#print("Detailed classification report:")
+#print("The model is trained on the full development set.")
+#print("The scores are computed on the full evaluation set.")
+#y_true, y_pred = y_test, lmnnclf.predict(X_test)
+#print(classification_report(y_true, y_pred))
+#
+
+##### SSC TUNING USPS ######
+ssc_param_list = [300]
+ssc_param_grid = {'max_iter': ssc_param_list}
+sscclf = GridSearchCV(SemiSupervisedLargeMarginNearestNeighbor(X_unlabeled=X_train_unlabelled), ssc_param_grid, cv=5, n_jobs=16, verbose=-1)
 start=time.time()
-lmnnclf.fit(X_train_labelled, y_train_labelled)
+sscclf.fit(X_train_labelled, y_train_labelled)
 end=time.time()
 print("time: {}".format(end-start))
-print("LMNN Best parameters set found on development set:")
-print(lmnnclf.best_params_)
+print("SSC Best parameters set found on development set:")
+print(sscclf.best_params_)
 print("Grid scores on development set:")
-means = lmnnclf.cv_results_['mean_test_score']
-stds = lmnnclf.cv_results_['std_test_score']
-for mean, std, params in zip(means, stds, lmnnclf.cv_results_['params']):
+means = sscclf.cv_results_['mean_test_score']
+stds = sscclf.cv_results_['std_test_score']
+for mean, std, params in zip(means, stds, sscclf.cv_results_['params']):
     print("%0.3f (+/-%0.03f) for %r"
           % (mean, std * 2, params))
 
 print("Detailed classification report:")
 print("The model is trained on the full development set.")
 print("The scores are computed on the full evaluation set.")
-y_true, y_pred = y_test, lmnnclf.predict(X_test)
+y_true, y_pred = y_test, sscclf.predict(X_test)
 print(classification_report(y_true, y_pred))
+
+#neigh = KNeighborsClassifier(n_neighbors=4)
+#neigh = neigh.fit(X_train_labelled, y_train_labelled)
+#print("USPS KNN : {}".format(neigh.score(X_test, y_test)))
+
+
