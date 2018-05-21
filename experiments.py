@@ -71,11 +71,13 @@ print("X_train_unlabelled: {}".format(X_train_unlabelled.shape))
 
 ##### LMNN TUNNING USPS ########  (Long execution!!)
 #lmnn_param_list = [2,5,10,50,100]
-lmnn_param_list = [2,5,10]
+lmnn_param_list = [2,5,10,30,50,75,100,200]
 lmnn_param_grid = {'max_iter': lmnn_param_list}
-lmnnclf = GridSearchCV(LargeMarginNearestNeighbor(), lmnn_param_grid, cv=5, n_jobs=20, verbose=3)
+lmnnclf = GridSearchCV(LargeMarginNearestNeighbor(), lmnn_param_grid, cv=10, n_jobs=16, verbose=-1)
+start=time.time()
 lmnnclf.fit(X_train_labelled, y_train_labelled)
-
+end=time.time()
+print("time: {}".format(end-start))
 print("LMNN Best parameters set found on development set:")
 print(lmnnclf.best_params_)
 print("Grid scores on development set:")
